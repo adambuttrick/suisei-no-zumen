@@ -600,7 +600,7 @@ class Particle {
       }
       
       if (this.stage === 2) {
-        this.color = color(14, 121, 178, 180);
+        this.color = color(59, 28, 50, 180);
       } else if (this.stage === 3) {
         this.color = color(59, 28, 50, 180);
       } else if (this.stage === 4 && !this.isDiscarded) {
