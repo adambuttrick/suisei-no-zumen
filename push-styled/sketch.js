@@ -1,16 +1,15 @@
-// Constants
 const NODE_SIZE = 100;
 const ICON_SIZE = 75;
 const LABEL_OFFSET_Y = 90;
 const ICON_MARGIN = 20;
-// Core state variables
+
 let nodes = {};
 let dataParticles = [];
 let regularFont;
 let titleFont;
 let icons = {};
 let failureController;
-// Service State Management
+
 class ServiceState {
   constructor(id, serviceNode, connectionNode, siloNode) {
     this.id = id;
@@ -156,7 +155,7 @@ class FailureController {
     
     if (activeServices.length === 0) {
     
-      this.lastFailureTime = millis(); // Reset the timer
+      this.lastFailureTime = millis();
       return;
     }
         const serviceToFail = random(activeServices);
@@ -190,7 +189,7 @@ class FailureController {
   
     else if (state.failureStage === 1) {
       state.siloOpacity = constrain(map(elapsedTime, 0, this.FADE_DURATION, 1, 0), 0, 1);
-      state.siloLabelOpacity = state.siloOpacity; // Silo label fades with silo
+      state.siloLabelOpacity = state.siloOpacity;
       
       if (elapsedTime >= this.FADE_DURATION) {
         this.createDispersionEffect(state);
@@ -272,7 +271,7 @@ class DispersingParticle {
       random(-3, 3),
       random(-5, -2)
     );
-    this.acceleration = createVector(0, 0.2); // Gravity
+    this.acceleration = createVector(0, 0.2);
     this.lifetime = 255;
     this.size = random(3, 8);
     this.originalSize = this.size;
@@ -373,7 +372,7 @@ class Node {
     pop();
   }
 }
-// Original Particle class for data flow (kept unchanged)
+
 class Particle {
   constructor(startNode) {
     this.x = startNode.x;
