@@ -11,7 +11,6 @@ const TRAIL_MIN_SIZE = 3;
 const TRAIL_MAX_SIZE = 8;
 const GLOW_RADIUS = NODE_SIZE * 1;
 const GLOW_DECAY_RATE = 0.05;
-
 let nodes = {};
 let dataParticles = [];
 let particlePool = [];
@@ -19,11 +18,9 @@ let regularFont;
 let titleFont;
 let icons = {};
 
-
 function imageLoadError(err) {
   console.warn('Error loading image:', err);
 }
-
 
 function preload() {
  
@@ -45,12 +42,311 @@ function preload() {
       })
       .catch(err => console.error(`Error loading ${name}:`, err));
   };
-
-  loadSvg('./icons/metadata.svg', 'metadata');
+    loadSvg('./icons/metadata.svg', 'metadata');
   loadSvg('./icons/depositor.svg', 'depositor');
   loadSvg('./icons/service.svg', 'service');
   loadSvg('./icons/enrich.svg', 'enrich');
   loadSvg('./icons/validation.svg', 'validation');
+}
+class ServiceState {
+  constructor(id, serviceNode, enrichmentNode) {
+    this.id = id;
+    this.serviceNode = serviceNode;
+    this.enrichmentNode = enrichmentNode;
+    this.status = 'active';
+    
+  
+    this.serviceOpacity = 1;             
+    this.enrichmentOpacity = 1;   
+    this.consumeLineOpacity = 1;  
+    this.enrichLineOpacity = 1;   
+    this.proposesLineOpacity = 1;
+    
+  
+    this.serviceLabelOpacity = 1; 
+    this.enrichmentLabelOpacity = 1;  
+    this.consumeLabelOpacity = 1; 
+    this.enrichLabelOpacity = 1;  
+    
+  
+    this.failureStage = 0;
+    this.restorationSubStage = 0;
+    this.fadeStartTime = 0;
+    this.dispersingParticles = [];
+    
+  
+    this.consumeConnection = {
+      start: nodes.doi,
+      end: serviceNode
+    };
+    this.enrichConnection = {
+      start: serviceNode,
+      end: enrichmentNode
+    };
+  }
+    reset() {
+    this.status = 'active';
+    this.serviceOpacity = 1;
+    this.enrichmentOpacity = 1;
+    this.consumeLineOpacity = 1;
+    this.enrichLineOpacity = 1;
+    this.proposesLineOpacity = 1;
+    this.serviceLabelOpacity = 1;
+    this.enrichmentLabelOpacity = 1;
+    this.consumeLabelOpacity = 1;
+    this.enrichLabelOpacity = 1;
+    this.failureStage = 0;
+    this.restorationSubStage = 0;
+    this.fadeStartTime = 0;
+    this.dispersingParticles = [];
+  }
+    drawConnections() {
+    push();
+    for (let i = 0; i < 1; i += 0.02) {
+      let alpha = 150 * (1 - i);
+      strokeWeight(5 - (3 * i));
+      
+      if (this.consumeLineOpacity > 0) {
+        stroke(200, 210, 220, alpha * this.consumeLineOpacity);
+        line(
+          this.consumeConnection.start.x, 
+          this.consumeConnection.start.y,
+          this.consumeConnection.end.x, 
+          this.consumeConnection.end.y
+        );
+      }
+      
+      if (this.enrichLineOpacity > 0) {
+        stroke(200, 210, 220, alpha * this.enrichLineOpacity);
+        line(
+          this.enrichConnection.start.x, 
+          this.enrichConnection.start.y,
+          this.enrichConnection.end.x, 
+          this.enrichConnection.end.y
+        );
+      }
+
+      if (this.proposesLineOpacity > 0) {
+        stroke(200, 210, 220, alpha * this.proposesLineOpacity);
+        line(
+          this.enrichmentNode.x,
+          this.enrichmentNode.y,
+          nodes.validation.x,
+          nodes.validation.y
+        );
+      }
+    }
+    pop();
+  }
+    updateParticles() {
+    for (let i = this.dispersingParticles.length - 1; i >= 0; i--) {
+      const particle = this.dispersingParticles[i];
+      particle.update();
+      
+      if (particle.isDead()) {
+        this.dispersingParticles.splice(i, 1);
+      }
+    }
+  }
+    drawParticles() {
+    this.dispersingParticles.forEach(particle => particle.draw());
+  }
+}
+class FailureManager {
+  constructor() {
+    this.serviceStates = [];
+    this.lastFailureTime = 0;
+    this.lastFailedServiceId = null;
+    this.failureInterval = this.getRandomInterval();
+    this.FADE_DURATION = 1000;
+    this.RESTORE_DELAY = 1000;
+    this.RESTORE_SERVICE_DURATION = 150;
+    this.RESTORE_CONSUME_DURATION = 150;
+    this.RESTORE_ENRICH_DURATION = 150;
+    this.RESTORE_ENRICHMENT_DURATION = 150;
+    this.DISPERSION_DELAY = 500;
+  }
+    initialize() {
+    for (let i = 1; i <= 3; i++) {
+      this.serviceStates.push(
+        new ServiceState(
+          i,
+          nodes[`service${i}`],
+          nodes[`enriched${i}`]
+        )
+      );
+    }
+  }
+    getRandomInterval() {
+    return random(5000, 15000);
+  }
+    update(currentTime) {
+    if (currentTime - this.lastFailureTime > this.failureInterval && 
+        !this.serviceStates.some(state => state.status === 'failing')) {
+      this.triggerFailure();
+      this.lastFailureTime = currentTime;
+      this.failureInterval = this.getRandomInterval();
+    }
+    
+    this.serviceStates.forEach(state => this.updateServiceState(state, currentTime));
+  }
+    triggerFailure() {
+    const activeServices = this.serviceStates.filter(state => 
+      state.status === 'active' && state.id !== this.lastFailedServiceId
+    );
+    
+    if (activeServices.length === 0) {
+      this.lastFailureTime = millis();
+      return;
+    }
+    
+    const serviceToFail = random(activeServices);
+    serviceToFail.status = 'failing';
+    serviceToFail.fadeStartTime = millis();
+    this.lastFailedServiceId = serviceToFail.id;
+  }
+    updateServiceState(state, currentTime) {
+    if (state.status !== 'failing') return;
+    
+    const elapsedTime = currentTime - state.fadeStartTime;
+    
+    
+    if (state.failureStage === 0) {
+      const fadeProgress = constrain(map(elapsedTime, 0, this.FADE_DURATION, 1, 0), 0, 1);
+      state.consumeLineOpacity = fadeProgress;
+      state.consumeLabelOpacity = fadeProgress;
+      state.enrichLineOpacity = fadeProgress;
+      state.enrichLabelOpacity = fadeProgress;
+      state.proposesLineOpacity = fadeProgress;  
+      
+      if (elapsedTime >= this.FADE_DURATION) {
+        state.failureStage = 1;
+        state.fadeStartTime = currentTime;
+      }
+    }
+    
+    else if (state.failureStage === 1) {
+      const fadeProgress = constrain(map(elapsedTime, 0, this.FADE_DURATION, 1, 0), 0, 1);
+      state.serviceOpacity = fadeProgress;
+      state.serviceLabelOpacity = fadeProgress;
+      
+      if (elapsedTime >= this.FADE_DURATION) {
+        state.failureStage = 2;
+        state.fadeStartTime = currentTime;
+      }
+    }
+    
+    else if (state.failureStage === 2) {
+      const fadeProgress = constrain(map(elapsedTime, 0, this.FADE_DURATION, 1, 0), 0, 1);
+      state.enrichmentOpacity = fadeProgress;
+      state.enrichmentLabelOpacity = fadeProgress;
+      
+      if (elapsedTime >= this.FADE_DURATION && !state.hasDispersed) {
+        state.hasDispersed = true;
+        this.createDispersionEffect(state);
+        setTimeout(() => {
+          state.failureStage = 3;  
+          state.fadeStartTime = millis();
+          state.restorationSubStage = 0;
+          state.hasDispersed = false;
+        }, this.DISPERSION_DELAY);
+      }
+    }
+    
+    else if (state.failureStage === 3) {
+      if (elapsedTime < this.RESTORE_DELAY) return;
+      
+      const restorationTime = elapsedTime - this.RESTORE_DELAY;
+      
+      
+      if (state.restorationSubStage === 0) {
+        const progress = constrain(map(restorationTime, 0, this.RESTORE_SERVICE_DURATION, 0, 1), 0, 1);
+        state.serviceOpacity = progress;
+        state.serviceLabelOpacity = progress;
+        
+        if (restorationTime >= this.RESTORE_SERVICE_DURATION) {
+          state.restorationSubStage = 1;
+          state.fadeStartTime = currentTime;
+        }
+      }
+      
+      else if (state.restorationSubStage === 1) {
+        const progress = constrain(map(restorationTime - this.RESTORE_SERVICE_DURATION,
+                                     0, this.RESTORE_CONSUME_DURATION, 0, 1), 0, 1);
+        state.consumeLineOpacity = progress;
+        state.consumeLabelOpacity = progress;
+        
+        if (restorationTime >= this.RESTORE_SERVICE_DURATION + this.RESTORE_CONSUME_DURATION) {
+          state.restorationSubStage = 2;
+        }
+      }
+      
+      else if (state.restorationSubStage === 2) {
+        const progress = constrain(map(restorationTime - this.RESTORE_SERVICE_DURATION - this.RESTORE_CONSUME_DURATION,
+                                     0, this.RESTORE_ENRICH_DURATION, 0, 1), 0, 1);
+        state.enrichLineOpacity = progress;
+        state.enrichLabelOpacity = progress;
+        state.enrichmentOpacity = progress;
+        state.enrichmentLabelOpacity = progress;
+        state.proposesLineOpacity = progress;  
+        
+        if (restorationTime >= this.RESTORE_SERVICE_DURATION + this.RESTORE_CONSUME_DURATION + this.RESTORE_ENRICH_DURATION) {
+          state.reset();
+        }
+      }
+    }
+  }
+    getFailingServiceIds() {
+    return this.serviceStates
+      .filter(state => state.status === 'failing' && state.failureStage >= 0)
+      .map(state => state.id);
+  }
+    createDispersionEffect(state) {
+    const particleCount = random(15, 20);
+    for (let i = 0; i < particleCount; i++) {
+      state.dispersingParticles.push(
+        new DispersingParticle(state.enrichmentNode.x, state.enrichmentNode.y)
+      );
+    }
+  }
+}
+
+class DispersingParticle {
+  constructor(x, y) {
+    this.position = createVector(x, y);
+    this.velocity = createVector(
+      random(-3, 3),
+      random(-5, -2)
+    );
+    this.acceleration = createVector(0, 0.2);
+    this.lifetime = 255;
+    this.size = random(3, 8);
+    this.originalSize = this.size;
+  }
+    update() {
+    this.velocity.add(this.acceleration);
+    this.position.add(this.velocity);
+    this.lifetime -= 4;
+    this.size = map(this.lifetime, 255, 0, this.originalSize, 0);
+  }
+    draw() {
+    push();
+    noStroke();
+    const fadeAlpha = map(this.lifetime, 255, 0, 255, 0);
+    fill(59, 28, 50, fadeAlpha);
+    
+  
+    for (let i = 1; i >= 0; i -= 0.2) {
+      let size = this.size * (1 + i);
+      let alpha = fadeAlpha * i;
+      fill(59, 28, 50, alpha);
+      ellipse(this.position.x, this.position.y, size, size);
+    }
+    pop();
+  }
+    isDead() {
+    return this.lifetime <= 0 || this.position.y > height;
+  }
 }
 
 class Node {
@@ -62,26 +358,24 @@ class Node {
     this.iconKey = iconKey;
     this.glowEffects = [];
   }
-
-  addGlowEffect() {
+    addGlowEffect() {
     this.glowEffects.push(new GlowEffect(this.x, this.y));
   }
-
-  updateGlowEffects() {
+    updateGlowEffects() {
     for (let i = this.glowEffects.length - 1; i >= 0; i--) {
       if (!this.glowEffects[i].update()) {
         this.glowEffects.splice(i, 1);
       }
     }
   }
-
-  draw() {
+    draw(opacity = 1, labelOpacity = 1) {
     this.glowEffects.forEach(effect => effect.draw());
     
     push();
-
+    
+  
     noStroke();
-    fill(0, 0, 0, 20);
+    fill(0, 0, 0, 20 * opacity);
     if (this.type === 'circle') {
       ellipse(this.x + 2, this.y + 2, NODE_SIZE + 2);
     } else {
@@ -89,24 +383,24 @@ class Node {
     }
 
     if (this.type === 'circle') {
-      stroke(51);
+      stroke(51, 51, 51, 255 * opacity);
       strokeWeight(2);
-      fill(255);
+      fill(255, 255, 255, 255 * opacity);
       ellipse(this.x, this.y, NODE_SIZE);
     } else if (this.type === 'enriched') {
-      stroke(59, 28, 50);
+      stroke(59, 28, 50, 255 * opacity);
       strokeWeight(2);
-      fill(232, 217, 227);
+      fill(232, 217, 227, 255 * opacity);
       rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
     } else if (this.type === 'validation') {
       strokeWeight(2);
-      stroke(41, 71, 96);
-      fill(0, 175, 181);
+      stroke(41, 71, 96, 255 * opacity);
+      fill(0, 175, 181, 255 * opacity);
       rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
     } else {
-      stroke(51);
+      stroke(51, 51, 51, 255 * opacity);
       strokeWeight(2);
-      fill(255);
+      fill(255, 255, 255, 255 * opacity);
       rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
     }
 
@@ -119,6 +413,7 @@ class Node {
       svg.style.left = `${canvasRect.left + this.x - ICON_SIZE/2}px`;
       svg.style.top = `${canvasRect.top + this.y - ICON_SIZE/2}px`;
       svg.style.pointerEvents = 'none';
+      svg.style.opacity = opacity;
       
       const iconId = `icon-${this.iconKey}-${this.x}-${this.y}`;
       if (!document.getElementById(iconId)) {
@@ -126,13 +421,15 @@ class Node {
         document.getElementById('canvas-container').appendChild(svg);
       }
     }
+
     noStroke();
-    fill(80);
+    fill(80, 255 * labelOpacity);
     textAlign(CENTER, CENTER);
     textFont(regularFont);
     textStyle(BOLD);
     textSize(16);
     text(this.label, this.x, this.y + LABEL_OFFSET_Y);
+    
     pop();
     
     this.updateGlowEffects();
@@ -147,13 +444,11 @@ class GlowEffect {
     this.decayRate = GLOW_DECAY_RATE;
     this.radius = GLOW_RADIUS;
   }
-
-  update() {
+    update() {
     this.intensity -= this.decayRate;
     return this.intensity > 0;
   }
-
-  draw() {
+    draw() {
     push();
     noStroke();
     const steps = 10;
@@ -171,8 +466,7 @@ class TrailParticle {
   constructor(x, y, size, opacity, velocity) {
     this.init(x, y, size, opacity, velocity);
   }
-
-  init(x, y, size, opacity, velocity) {
+    init(x, y, size, opacity, velocity) {
     this.x = x;
     this.y = y;
     this.size = size;
@@ -181,8 +475,7 @@ class TrailParticle {
     this.vx = velocity ? velocity.x * 0.3 : 0;
     this.vy = velocity ? velocity.y * 0.3 : 0;
   }
-
-  update() {
+    update() {
     this.opacity -= this.decay;
     this.x += this.vx;
     this.y += this.vy;
@@ -190,8 +483,7 @@ class TrailParticle {
     this.vy *= 0.95;
     return this.opacity > 0;
   }
-
-  draw() {
+    draw() {
     push();
     noStroke();
     fill(253, 162, 33, this.opacity * 255);
@@ -199,7 +491,6 @@ class TrailParticle {
     pop();
   }
 }
-
 
 function getTrailParticle(x, y, size, opacity, velocity) {
   let particle = particlePool.pop();
@@ -210,11 +501,9 @@ function getTrailParticle(x, y, size, opacity, velocity) {
   }
   return particle;
 }
-
 function recycleTrailParticle(particle) {
   particlePool.push(particle);
 }
-
 
 class Particle {
   constructor(startNode) {
@@ -223,7 +512,7 @@ class Particle {
     this.prevX = this.x;
     this.prevY = this.y;
     this.stage = 0;
-    this.targetService = floor(random(3));
+    this.targetService = this.selectInitialService();
     this.progress = 0;
     this.color = color(14, 121, 178, 180);
     this.size = 10;
@@ -233,15 +522,42 @@ class Particle {
     this.trailCounter = 0;
     this.velocity = { x: 0, y: 0 };
   }
-
-  updateVelocity() {
+    selectInitialService() {
+    const availableServices = [0, 1, 2].filter(id => {
+      const serviceState = failureManager.serviceStates[id];
+      return serviceState && serviceState.status === 'active';
+    });
+    
+    return availableServices.length > 0 ? 
+      random(availableServices) : 
+      floor(random(3));
+  }
+    findNewTarget() {
+    const availableServices = [0, 1, 2].filter(id => {
+      const serviceState = failureManager.serviceStates[id];
+      return serviceState && serviceState.status === 'active';
+    });
+    
+    if (availableServices.length > 0) {
+    
+      const otherServices = availableServices.filter(id => id !== this.targetService);
+      this.targetService = random(otherServices.length > 0 ? otherServices : availableServices);
+      this.progress = 0;
+    } else {
+    
+      this.isDiscarded = true;
+      this.stage = 4;
+      this.progress = 0;
+      this.color = color(200, 200, 200, 180);
+    }
+  }
+    updateVelocity() {
     this.velocity.x = this.x - this.prevX;
     this.velocity.y = this.y - this.prevY;
     this.prevX = this.x;
     this.prevY = this.y;
   }
-
-  updateTrail() {
+    updateTrail() {
     if (this.stage === 4 && !this.isDiscarded) {
       this.trailCounter += 1;
       if (this.trailCounter >= 1 / TRAIL_SPAWN_RATE) {
@@ -252,8 +568,7 @@ class Particle {
         this.trailCounter = 0;
       }
     }
-
-    for (let i = this.trail.length - 1; i >= 0; i--) {
+        for (let i = this.trail.length - 1; i >= 0; i--) {
       const alive = this.trail[i].update();
       if (!alive) {
         recycleTrailParticle(this.trail[i]);
@@ -261,10 +576,17 @@ class Particle {
       }
     }
   }
-
-  update() {
+    update() {
     this.prevX = this.x;
     this.prevY = this.y;
+    
+  
+    if (this.stage === 1 || this.stage === 2) {
+      const serviceState = failureManager.serviceStates[this.targetService];
+      if (serviceState && serviceState.status === 'failing') {
+        this.findNewTarget();
+      }
+    }
     
     this.progress += 0.02;
     
@@ -299,22 +621,25 @@ class Particle {
       }
     }
   }
-
-  updatePosition() {
+    updatePosition() {
     if (this.stage === 0) {
+    
       this.x = lerp(nodes.depositor.x, nodes.doi.x, this.progress);
       this.y = lerp(nodes.depositor.y, nodes.doi.y, this.progress);
     } else if (this.stage === 1) {
+    
       let targetY = nodes.service1.y + (this.targetService * 200);
       let progress = this.easeInOutQuad(this.progress);
       this.x = lerp(nodes.doi.x, nodes.service1.x, progress);
       this.y = lerp(nodes.doi.y, targetY, progress);
     } else if (this.stage === 2) {
+    
       let sourceY = nodes.service1.y + (this.targetService * 200);
       let targetY = nodes.enriched1.y + (this.targetService * 200);
       this.x = lerp(nodes.service1.x, nodes.enriched1.x, this.progress);
       this.y = lerp(sourceY, targetY, this.progress);
     } else if (this.stage === 3) {
+    
       let sourceY = nodes.enriched1.y + (this.targetService * 200);
       this.x = lerp(nodes.enriched1.x, nodes.validation.x, this.progress);
       this.y = lerp(sourceY, nodes.validation.y, this.progress);
@@ -326,8 +651,7 @@ class Particle {
       }
     }
   }
-
-  updateDiscardedPosition() {
+    updateDiscardedPosition() {
     let t = this.progress;
     let startX = nodes.validation.x;
     let startY = nodes.validation.y;
@@ -350,8 +674,7 @@ class Particle {
       180 * (1 - this.progress)
     );
   }
-
-  updateReturnPosition() {
+    updateReturnPosition() {
     let centerX = (nodes.validation.x + nodes.doi.x) / 2;
     let centerY = nodes.validation.y;
     let ellipseWidth = nodes.validation.x - nodes.doi.x;
@@ -364,8 +687,7 @@ class Particle {
     this.x = centerX + (ellipseWidth/2 * cos(angle));
     this.y = centerY + (ellipseHeight/2 * sin(angle));
   }
-
-  draw() {
+    draw() {
     this.trail.forEach(particle => particle.draw());
     push();
     for (let i = 1; i >= 0; i -= 0.2) {
@@ -377,69 +699,41 @@ class Particle {
     }
     pop();
   }
-
-  easeInOutQuad(t) {
+    easeInOutQuad(t) {
     return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
   }
 }
 
-
-function setup() {
-  let canvas = createCanvas(1400, 800);
-  canvas.parent("canvas-container");
-  smooth();
-  
- 
-  textFont('Montserrat');
-  regularFont = 'Montserrat';
-  titleFont = 'Montserrat';
-  
- 
-  nodes.depositor = new Node(200, 400, 'rect', 'Object\nCreator', 'depositor');
-  nodes.doi = new Node(450, 400, 'rect', 'DOI\nMetadata', 'metadata');
-  
- 
-  nodes.service1 = new Node(750, 200, 'rect', 'Service A', 'service');
-  nodes.service2 = new Node(750, 400, 'rect', 'Service B', 'service');
-  nodes.service3 = new Node(750, 600, 'rect', 'Service C', 'service');
-  
- 
-  nodes.enriched1 = new Node(950, 200, 'enriched', 'Service A\nEnrichment', 'enrich');
-  nodes.enriched2 = new Node(950, 400, 'enriched', 'Service B\nEnrichment', 'enrich');
-  nodes.enriched3 = new Node(950, 600, 'enriched', 'Service C\nEnrichment', 'enrich');
-  
- 
-  nodes.validation = new Node(1150, 400, 'validation', 'Community+\nRules-based\nValidation', 'validation');
-}
-
-
 function drawConnections() {
   push();
- 
-  for (let i = 0; i < 1; i += 0.02) {
+  
+    for (let i = 0; i < 1; i += 0.02) {
     let alpha = 150 * (1 - i);
-    stroke(200, 210, 220, alpha);
     strokeWeight(5 - (3 * i));
     
-   
+  
+    stroke(200, 210, 220, alpha);
     line(nodes.depositor.x, nodes.depositor.y, nodes.doi.x, nodes.doi.y);
-    line(nodes.doi.x, nodes.doi.y, nodes.service1.x, nodes.service1.y);
-    line(nodes.doi.x, nodes.doi.y, nodes.service2.x, nodes.service2.y);
-    line(nodes.doi.x, nodes.doi.y, nodes.service3.x, nodes.service3.y);
     
-   
-    line(nodes.service1.x, nodes.service1.y, nodes.enriched1.x, nodes.enriched1.y);
-    line(nodes.service2.x, nodes.service2.y, nodes.enriched2.x, nodes.enriched2.y);
-    line(nodes.service3.x, nodes.service3.y, nodes.enriched3.x, nodes.enriched3.y);
+  
+    failureManager.serviceStates.forEach((state, index) => {
     
-   
-    line(nodes.enriched1.x, nodes.enriched1.y, nodes.validation.x, nodes.validation.y);
-    line(nodes.enriched2.x, nodes.enriched2.y, nodes.validation.x, nodes.validation.y);
-    line(nodes.enriched3.x, nodes.enriched3.y, nodes.validation.x, nodes.validation.y);
+      stroke(200, 210, 220, alpha * state.consumeLineOpacity);
+      line(nodes.doi.x, nodes.doi.y, nodes[`service${index + 1}`].x, nodes[`service${index + 1}`].y);
+      
+    
+      stroke(200, 210, 220, alpha * state.enrichLineOpacity);
+      line(nodes[`service${index + 1}`].x, nodes[`service${index + 1}`].y, 
+           nodes[`enriched${index + 1}`].x, nodes[`enriched${index + 1}`].y);
+           
+    
+      stroke(200, 210, 220, alpha * state.proposesLineOpacity);
+      line(nodes[`enriched${index + 1}`].x, nodes[`enriched${index + 1}`].y, 
+           nodes.validation.x, nodes.validation.y);
+    });
   }
   
- 
-  drawDottedReturnPath(true); 
+  drawDottedReturnPath(true);
   drawDottedReturnPath(false);
   pop();
 }
@@ -471,22 +765,53 @@ function drawDottedReturnPath(isTop) {
   }
   pop();
 }
-
 function drawRelationshipLabels() {
   push();
   textStyle(BOLD);
   textSize(12);
   textFont(regularFont);
   textAlign(CENTER, CENTER);
-  fill(100, 100, 100);
   noStroke();
   
- 
+    fill(100, 100, 100);
   text("Creates", (nodes.depositor.x + nodes.doi.x) / 2, nodes.depositor.y - 25);
-  text("Consumes", (nodes.doi.x + nodes.service2.x) / 2, nodes.doi.y - 25);
   text("Proposes", (nodes.enriched2.x + nodes.validation.x) / 2, nodes.validation.y - 25);
   text("Updates or\nRejects", nodes.validation.x + 100, nodes.validation.y);
+  
+    failureManager.serviceStates.forEach((state, index) => {
+    fill(100, 100, 100, state.consumeLabelOpacity * 255);
+    const serviceX = nodes[`service${index + 1}`].x;
+    const serviceY = nodes[`service${index + 1}`].y;
+    text("Consumes", (nodes.doi.x + serviceX) / 2, nodes.doi.y - 25);
+  });
+  
   pop();
+}
+
+function setup() {
+  let canvas = createCanvas(1400, 800);
+  canvas.parent("canvas-container");
+  smooth();
+  
+  textFont('Montserrat');
+  regularFont = 'Montserrat';
+  titleFont = 'Montserrat';
+  
+    nodes.depositor = new Node(200, 400, 'rect', 'Object\nCreator', 'depositor');
+  nodes.doi = new Node(450, 400, 'rect', 'DOI\nMetadata', 'metadata');
+  
+  nodes.service1 = new Node(750, 200, 'rect', 'Service A', 'service');
+  nodes.service2 = new Node(750, 400, 'rect', 'Service B', 'service');
+  nodes.service3 = new Node(750, 600, 'rect', 'Service C', 'service');
+  
+  nodes.enriched1 = new Node(950, 200, 'enriched', 'Service A\nEnrichment', 'enrich');
+  nodes.enriched2 = new Node(950, 400, 'enriched', 'Service B\nEnrichment', 'enrich');
+  nodes.enriched3 = new Node(950, 600, 'enriched', 'Service C\nEnrichment', 'enrich');
+  
+  nodes.validation = new Node(1150, 400, 'validation', 'Community+\nRules-based\nValidation', 'validation');
+
+  failureManager = new FailureManager();
+  failureManager.initialize();
 }
 
 function draw() {
@@ -495,23 +820,24 @@ function draw() {
   oldSvgs.forEach(svg => svg.remove());
   background(252, 253, 255);
   
-  push();
+    failureManager.update(millis());
+  
+    push();
   textFont(titleFont);
   textAlign(LEFT, TOP);
   fill(60);
   textSize(48);
   text("COMET Model", 40, 40);
   pop();
-   
-  drawConnections();
   
+    drawConnections();
   drawRelationshipLabels();
   
-  if (random() < 0.05) {
+    if (random() < 0.05) {
     dataParticles.push(new Particle(nodes.depositor));
-  } 
- 
-  for (let i = dataParticles.length - 1; i >= 0; i--) {
+  }
+  
+    for (let i = dataParticles.length - 1; i >= 0; i--) {
     let p = dataParticles[i];
     p.update();
     p.draw();
@@ -519,7 +845,21 @@ function draw() {
     if (p.stage >= 5) {
       dataParticles.splice(i, 1);
     }
-  }  
- 
-  Object.values(nodes).forEach(node => node.draw());
+  }
+  
+    nodes.depositor.draw();
+  nodes.doi.draw();
+  nodes.validation.draw();
+  
+    failureManager.serviceStates.forEach((state, index) => {
+    const serviceNode = nodes[`service${index + 1}`];
+    const enrichmentNode = nodes[`enriched${index + 1}`];
+    
+    serviceNode.draw(state.serviceOpacity, state.serviceLabelOpacity);
+    enrichmentNode.draw(state.enrichmentOpacity, state.enrichmentLabelOpacity);
+    
+  
+    state.updateParticles();
+    state.drawParticles();
+  });
 }
