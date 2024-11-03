@@ -358,51 +358,49 @@ class Node {
     this.iconKey = iconKey;
     this.glowEffects = [];
   }
-    addGlowEffect() {
+
+  addGlowEffect() {
     this.glowEffects.push(new GlowEffect(this.x, this.y));
   }
-    updateGlowEffects() {
+
+  updateGlowEffects() {
     for (let i = this.glowEffects.length - 1; i >= 0; i--) {
       if (!this.glowEffects[i].update()) {
         this.glowEffects.splice(i, 1);
       }
     }
   }
-    draw(opacity = 1, labelOpacity = 1) {
+
+  draw(opacity = 1, labelOpacity = 1) {
     this.glowEffects.forEach(effect => effect.draw());
     
     push();
     
-  
     noStroke();
     fill(0, 0, 0, 20 * opacity);
-    if (this.type === 'circle') {
-      ellipse(this.x + 2, this.y + 2, NODE_SIZE + 2);
-    } else {
-      rect(this.x - NODE_SIZE/2 + 2, this.y - NODE_SIZE/2 + 2, NODE_SIZE, NODE_SIZE, 15);
-    }
+    rect(this.x - NODE_SIZE/2 + 2, this.y - NODE_SIZE/2 + 2, NODE_SIZE, NODE_SIZE, 15);
 
-    if (this.type === 'circle') {
-      stroke(51, 51, 51, 255 * opacity);
-      strokeWeight(2);
-      fill(255, 255, 255, 255 * opacity);
-      ellipse(this.x, this.y, NODE_SIZE);
-    } else if (this.type === 'enriched') {
+    strokeWeight(2);
+    
+    if (this.iconKey === 'service' || this.iconKey === 'enrich') {
+      // Service and Enriched nodes stroke and fill colors
       stroke(59, 28, 50, 255 * opacity);
-      strokeWeight(2);
       fill(232, 217, 227, 255 * opacity);
-      rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
-    } else if (this.type === 'validation') {
-      strokeWeight(2);
+    } else if (this.iconKey === 'validation') {
+      // Validation node stroke and fill colors
+      stroke(253, 162, 33, 255 * opacity);
+      fill(252, 219, 128, 255 * opacity);
+    } else if (this.iconKey === 'depositor') {
+      // Creator node stroke and fill colors
       stroke(41, 71, 96, 255 * opacity);
       fill(0, 175, 181, 255 * opacity);
-      rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
-    } else {
-      stroke(51, 51, 51, 255 * opacity);
-      strokeWeight(2);
-      fill(255, 255, 255, 255 * opacity);
-      rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
+    } else if (this.iconKey === 'metadata') {
+      // DOI Metadata node stroke and fill colors
+      stroke(14, 121, 178, 255 * opacity);
+      fill(217, 232, 247, 255 * opacity);
     }
+
+    rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
 
     if (this.iconKey && icons[this.iconKey]) {
       const svg = icons[this.iconKey].cloneNode(true);
