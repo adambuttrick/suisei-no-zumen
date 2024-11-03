@@ -5,9 +5,16 @@ const DISCARD_DISTANCE = 400;
 const ICON_SIZE = 75;
 const LABEL_OFFSET_Y = 90;
 const ICON_MARGIN = 20;
+const TRAIL_LENGTH = 20;
+const TRAIL_SPAWN_RATE = 0.2;
+const TRAIL_MIN_SIZE = 3;
+const TRAIL_MAX_SIZE = 8;
+const GLOW_RADIUS = NODE_SIZE * 1;
+const GLOW_DECAY_RATE = 0.05;
 
 let nodes = {};
 let dataParticles = [];
+let particlePool = [];
 let regularFont;
 let titleFont;
 let icons = {};
@@ -53,12 +60,26 @@ class Node {
     this.type = type;
     this.label = label;
     this.iconKey = iconKey;
+    this.glowEffects = [];
+  }
+
+  addGlowEffect() {
+    this.glowEffects.push(new GlowEffect(this.x, this.y));
+  }
+
+  updateGlowEffects() {
+    for (let i = this.glowEffects.length - 1; i >= 0; i--) {
+      if (!this.glowEffects[i].update()) {
+        this.glowEffects.splice(i, 1);
+      }
+    }
   }
 
   draw() {
-    push();
+    this.glowEffects.forEach(effect => effect.draw());
     
-   
+    push();
+
     noStroke();
     fill(0, 0, 0, 20);
     if (this.type === 'circle') {
@@ -67,7 +88,6 @@ class Node {
       rect(this.x - NODE_SIZE/2 + 2, this.y - NODE_SIZE/2 + 2, NODE_SIZE, NODE_SIZE, 15);
     }
 
-   
     if (this.type === 'circle') {
       stroke(51);
       strokeWeight(2);
@@ -90,7 +110,6 @@ class Node {
       rect(this.x - NODE_SIZE/2, this.y - NODE_SIZE/2, NODE_SIZE, NODE_SIZE, 15);
     }
 
-   
     if (this.iconKey && icons[this.iconKey]) {
       const svg = icons[this.iconKey].cloneNode(true);
       const canvas = document.querySelector('#canvas-container canvas');
@@ -101,14 +120,12 @@ class Node {
       svg.style.top = `${canvasRect.top + this.y - ICON_SIZE/2}px`;
       svg.style.pointerEvents = 'none';
       
-     
       const iconId = `icon-${this.iconKey}-${this.x}-${this.y}`;
       if (!document.getElementById(iconId)) {
         svg.id = iconId;
         document.getElementById('canvas-container').appendChild(svg);
       }
     }
-
     noStroke();
     fill(80);
     textAlign(CENTER, CENTER);
@@ -117,7 +134,85 @@ class Node {
     textSize(16);
     text(this.label, this.x, this.y + LABEL_OFFSET_Y);
     pop();
+    
+    this.updateGlowEffects();
   }
+}
+
+class GlowEffect {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.intensity = 1.0;
+    this.decayRate = GLOW_DECAY_RATE;
+    this.radius = GLOW_RADIUS;
+  }
+
+  update() {
+    this.intensity -= this.decayRate;
+    return this.intensity > 0;
+  }
+
+  draw() {
+    push();
+    noStroke();
+    const steps = 10;
+    for (let i = steps; i > 0; i--) {
+      const ratio = i / steps;
+      const glowAlpha = this.intensity * ratio * 100;
+      fill(252, 219, 128, glowAlpha);
+      ellipse(this.x, this.y, this.radius * (2 - ratio));
+    }
+    pop();
+  }
+}
+
+class TrailParticle {
+  constructor(x, y, size, opacity, velocity) {
+    this.init(x, y, size, opacity, velocity);
+  }
+
+  init(x, y, size, opacity, velocity) {
+    this.x = x;
+    this.y = y;
+    this.size = size;
+    this.opacity = opacity;
+    this.decay = 0.03;
+    this.vx = velocity ? velocity.x * 0.3 : 0;
+    this.vy = velocity ? velocity.y * 0.3 : 0;
+  }
+
+  update() {
+    this.opacity -= this.decay;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.95;
+    this.vy *= 0.95;
+    return this.opacity > 0;
+  }
+
+  draw() {
+    push();
+    noStroke();
+    fill(253, 162, 33, this.opacity * 255);
+    ellipse(this.x, this.y, this.size);
+    pop();
+  }
+}
+
+
+function getTrailParticle(x, y, size, opacity, velocity) {
+  let particle = particlePool.pop();
+  if (particle) {
+    particle.init(x, y, size, opacity, velocity);
+  } else {
+    particle = new TrailParticle(x, y, size, opacity, velocity);
+  }
+  return particle;
+}
+
+function recycleTrailParticle(particle) {
+  particlePool.push(particle);
 }
 
 
@@ -125,6 +220,8 @@ class Particle {
   constructor(startNode) {
     this.x = startNode.x;
     this.y = startNode.y;
+    this.prevX = this.x;
+    this.prevY = this.y;
     this.stage = 0;
     this.targetService = floor(random(3));
     this.progress = 0;
@@ -132,9 +229,43 @@ class Particle {
     this.size = 10;
     this.returnPath = random() < 0.5 ? 'top' : 'bottom';
     this.isDiscarded = false;
+    this.trail = [];
+    this.trailCounter = 0;
+    this.velocity = { x: 0, y: 0 };
+  }
+
+  updateVelocity() {
+    this.velocity.x = this.x - this.prevX;
+    this.velocity.y = this.y - this.prevY;
+    this.prevX = this.x;
+    this.prevY = this.y;
+  }
+
+  updateTrail() {
+    if (this.stage === 4 && !this.isDiscarded) {
+      this.trailCounter += 1;
+      if (this.trailCounter >= 1 / TRAIL_SPAWN_RATE) {
+        const speed = sqrt(this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y);
+        const size = map(speed, 0, 10, TRAIL_MIN_SIZE, TRAIL_MAX_SIZE);
+        const trailParticle = getTrailParticle(this.x, this.y, size, 0.8, this.velocity);
+        this.trail.push(trailParticle);
+        this.trailCounter = 0;
+      }
+    }
+
+    for (let i = this.trail.length - 1; i >= 0; i--) {
+      const alive = this.trail[i].update();
+      if (!alive) {
+        recycleTrailParticle(this.trail[i]);
+        this.trail.splice(i, 1);
+      }
+    }
   }
 
   update() {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    
     this.progress += 0.02;
     
     if (this.progress >= 1) {
@@ -158,6 +289,15 @@ class Particle {
     }
     
     this.updatePosition();
+    this.updateVelocity();
+    this.updateTrail();
+
+    if (this.stage === 4 && !this.isDiscarded) {
+      const distToDOI = dist(this.x, this.y, nodes.doi.x, nodes.doi.y);
+      if (distToDOI < NODE_SIZE/2) {
+        nodes.doi.addGlowEffect();
+      }
+    }
   }
 
   updatePosition() {
@@ -226,6 +366,7 @@ class Particle {
   }
 
   draw() {
+    this.trail.forEach(particle => particle.draw());
     push();
     for (let i = 1; i >= 0; i -= 0.2) {
       let size = this.size * (1 + i);
